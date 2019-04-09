@@ -1,7 +1,4 @@
-﻿// TODO - get price + shipping
-
-
-using HtmlAgilityPack;
+﻿using HtmlAgilityPack;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -59,10 +56,7 @@ namespace ebayScrapper
 
         public bool OnPreRequestEbay(HttpWebRequest request)
         {
-            CookieCollection cookieCollection = cookieCollectionFromCookieString(getDentan100Cookies(), "www.ebay.com");
-
-           
-            //CookieCollection cookieCollection = cookieCollectionFromCookieString(getYakovEbayCookie200PerPage(), "www.ebay.com");
+            CookieCollection cookieCollection = cookieCollectionFromCookieString(getYakovEbayCookie200PerPage(), "www.ebay.com");
             request.CookieContainer.Add(cookieCollection);
             return true;
         }
@@ -103,7 +97,7 @@ namespace ebayScrapper
         // thread makes print to form work well and  doesnt  get it to hang
         private void button1_Click_inThread(object sender, EventArgs e)
         {
-            string ourStoreName = "dentan100";
+            string DENTAN200 = "dentan200";
 
             //string amazonPriceInput = TextBox1.Text;
             //if (!string.IsNullOrWhiteSpace(amazonPriceInput))
@@ -113,15 +107,8 @@ namespace ebayScrapper
             //    myPrint(str7);
             //}
 
-            List<string> allItemsToScan ; 
-            List<SaleFreaksRow> allItemsToScan2 = ExcelReadDental.readXLS();
-
-            // filter out null  titles and 3M titles
-            allItemsToScan2 = allItemsToScan2.Where(i => i.title!=null &&  !(i.title.Substring(0,2)=="3M")).ToList();
-            //to be updated to scraping dentan100 store instead od dentan200....
-            //List<SaleFreaksRow> allItemsToScan2 = ExcelReadDental.ReduceTextOnList(allitems);
-
-
+            List<string> allItemsToScan = null; // either all of dentqn200 items or the search string entered
+            List<SaleFreaksRow> allItemsToScan2 = null;
             if (scrapAllProducts)
             {
                 // get all title  from ebay
@@ -129,9 +116,9 @@ namespace ebayScrapper
 
                 // get all titles and other data (price in Amazon) from bloody salefreaks
                 //allItemsToScan2 = getAllSaleFreakItems(DENTAN200);
-
-               // allItemsToScan2.Add(new SaleFreaksRow { price = "100", profit = "5", title = "kitty" });
-                //allItemsToScan2.Add(new SaleFreaksRow { price = "100", profit = "5", title = "ballon" });
+                allItemsToScan2 = new List<SaleFreaksRow>();
+                allItemsToScan2.Add(new SaleFreaksRow { price = "100", profit = "5", title = "kitty" });
+                allItemsToScan2.Add(new SaleFreaksRow { price = "100", profit = "5", title = "ballon" });
 
             }
             else
@@ -391,26 +378,91 @@ namespace ebayScrapper
 
                             double itemPriceVal = (itemPrice != null) ? ParsePrice(itemPrice) : 0;
 
-                            // add shipping to item price
-                            string shippingPrice = item.Descendants("span").Where(d => d.Attributes.Contains("class") && d.Attributes["class"].Value.Contains("s-item__shipping s-item__logisticsCost")).FirstOrDefault()?.InnerHtml;
-                            double shippingPriceVal = ParsePrice(shippingPrice);
-                            if (shippingPriceVal > 0)
-                                myPrint($"added shipping of {shippingPriceVal} to price of {itemPriceVal} for item {search}");
-                            itemPriceVal += shippingPriceVal;
-
-
                             itemOffers.Add(new itemData { name = itemName, secondaryInfo = secondaryInfo, itemPrice = itemPrice, itemPriceVal = itemPriceVal, href = href, storeName = storeName });
 
                             //string allItemStr = itemName + BR + secondaryInfo + BR + itemPrice + BR + href + BR + "-----------------------" + BR + BR;
                             //myPrint(allItemStr);
                         }
 
-                        // order acending from lowest price to hightest, for now actually keep ebay sorting - it is good
+                        // order acending from lowest price to hightest, for now actuaqlly keep ebay soritng - it is good
                         List<itemData> sortedList = itemOffers; //.OrderBy(item => item.itemPriceVal).ToList();
 
-                        //AddItemRowsToExcelOld(sortedList, MySheet, ref excelRow, supplierPrice, sfItem, search, DENTAN200);
-                        AddItemRowsToExcelNew(sortedList, MySheet, ref excelRow, supplierPrice, sfItem, search, ourStoreName);
+                        // prepare few rows for the excel
+                        // if dentan200 is in the first 3 cheapest - give  3 cheapest
+                        // otherwize try find  dentan in the first 10 cheapest
+                        // in any case show only 3 rows
+                        // if dentan is cheapest don't show anything and skip to next
+                        int itemCount = 0;
+                        string ourStoreName = DENTAN200;
+                        foreach (var item in sortedList)
+                        {
+                            // fetch the store name
+                            //HtmlAgilityPack.HtmlDocument itemDoc = web.Load(item.href);
+                            //string storeName = itemDoc.GetElementbyId("RightSummaryPanel").Descendants().Where(d => d.Attributes.Contains("id") && d.Attributes["id"].Value.Contains("mbgLink")).FirstOrDefault()?.Descendants("span").FirstOrDefault().InnerHtml;
+                            string storeName = item.storeName;
+                            bool isDentan = storeName.ToLower().Contains(ourStoreName);
+                            double storeProfit = 0.876 * item.itemPriceVal - 0.3 - supplierPrice; // for dentan item  this should yield the value of "profit" obtained from saleFreaks
+                            storeProfit = Math.Truncate((storeProfit + 0.005) * 100) / 100;
 
+
+                            // handle green first line
+                            if (itemCount == 0)
+                            {
+                                MySheet.Cells[excelRow, 1, excelRow, 6].Style.Font.Color.SetColor(System.Drawing.Color.Green);
+                                MySheet.Cells[excelRow, 1].Value = search;
+                                // if Dentan is cheapest (first) add some info to green line an finish 
+                                if (isDentan)
+                                {
+                                    MySheet.Cells[excelRow, 3].Value = item.itemPriceVal;
+                                    MySheet.Cells[excelRow, 4].Value = supplierPrice;
+                                    MySheet.Cells[excelRow, 5].Value = storeProfit;   // should be same as sfItem.profit
+                                    if (storeProfit != Convert.ToDouble(sfItem.profit))
+                                    {
+                                        MySheet.Cells[excelRow, 6].Value = sfItem.profit;
+                                    }
+                                    excelRow++;
+                                    break;
+                                }
+                                else
+                                {
+                                    excelRow++;
+                                }
+                            }
+
+                            if (itemCount < 3 || isDentan)
+                            {
+                                    // set Dentan linbe to red
+                                    MySheet.Cells[excelRow, 1, excelRow, 3].Style.Font.Color.SetColor(
+                                        isDentan ? System.Drawing.Color.Red : System.Drawing.Color.Black);
+                                MySheet.Cells[excelRow, 1].Value = item.name;
+                                MySheet.Cells[excelRow, 2].Value = storeName;
+                                MySheet.Cells[excelRow, 3].Value = item.itemPriceVal;
+                                MySheet.Cells[excelRow, 4].Value = supplierPrice;
+                                //MySheet.Cells[excelRow, 5].Formula = $"+(C{excelRow}-(C{excelRow}*0.1)-(C{excelRow}*0.029+0.3))-D{excelRow}";   // "+(C2-(C2*0.1)-(C2*0.029+0.3))-D2";
+
+                                MySheet.Cells[excelRow, 5].Value = storeProfit;
+                                excelRow++;
+
+                                //string allItemStr = "added to excel: " + item.name + BR + item.secondaryInfo + BR + item.itemPrice + BR + storeName + BR + item.href + BR + BR;
+                                //myPrint(allItemStr);
+                            }
+
+                            if (isDentan && itemCount >= 3)
+                                break;
+
+                            itemCount++;
+                            if ((itemCount % 10) == 0)
+                            {
+                                string str = "dentan not found in first " + itemCount.ToString() + " cheapest items" + BR;
+                                //myPrint(str);
+                            }
+                        }
+
+                        // if no matches found - probably search of item was not good
+                        if (sortedList.Count == 0)
+                        {
+                            MySheet.Cells[excelRow, 1].Value = $"NO ITEMS FOUND for: {search}";
+                        }
 
                         p.Save();
 
@@ -425,176 +477,6 @@ namespace ebayScrapper
             } // loop on all danon item
 
             myPrint("done!");
-
-        }
-
-        private void AddItemRowsToExcelOld(List<itemData> sortedList,  ExcelWorksheet MySheet, ref int excelRow, 
-                double supplierPrice, SaleFreaksRow sfItem, string search, string DENTAN200)
-        {
-            // prepare few rows for the excel
-            // if dentan200 is in the first 3 cheapest - give  3 cheapest
-            // otherwize try find  dentan in the first 10 cheapest
-            // in any case show only 3 rows
-            // if dentan is cheapest don't show anything and skip to next
-            int itemCount = 0;
-            string ourStoreName = DENTAN200;
-            foreach (var item in sortedList)
-            {
-                // fetch the store name
-                //HtmlAgilityPack.HtmlDocument itemDoc = web.Load(item.href);
-                //string storeName = itemDoc.GetElementbyId("RightSummaryPanel").Descendants().Where(d => d.Attributes.Contains("id") && d.Attributes["id"].Value.Contains("mbgLink")).FirstOrDefault()?.Descendants("span").FirstOrDefault().InnerHtml;
-                string storeName = item.storeName;
-                bool isDentan = storeName.ToLower().Contains(ourStoreName);
-                double storeProfit = 0.876 * item.itemPriceVal - 0.3 - supplierPrice; // for dentan item  this should yield the value of "profit" obtained from saleFreaks
-                storeProfit = Math.Truncate((storeProfit + 0.005) * 100) / 100;
-
-
-                // handle green first line
-                if (itemCount == 0)
-                {
-                    MySheet.Cells[excelRow, 1, excelRow, 6].Style.Font.Color.SetColor(System.Drawing.Color.Green);
-                    MySheet.Cells[excelRow, 1].Value = search;
-                    // if Dentan is cheapest (first) add some info to green line an finish 
-                    if (isDentan)
-                    {
-                        MySheet.Cells[excelRow, 3].Value = item.itemPriceVal;
-                        MySheet.Cells[excelRow, 4].Value = supplierPrice;
-                        MySheet.Cells[excelRow, 5].Value = storeProfit;   // should be same as sfItem.profit
-                        if (storeProfit != Convert.ToDouble(sfItem.profit))
-                        {
-                            MySheet.Cells[excelRow, 6].Value = sfItem.profit;
-                        }
-                        excelRow++;
-                        break;
-                    }
-                    else
-                    {
-                        excelRow++;
-                    }
-                }
-
-                if (itemCount < 3 || isDentan)
-                {
-                    // set Dentan linbe to red
-                    MySheet.Cells[excelRow, 1, excelRow, 3].Style.Font.Color.SetColor(
-                        isDentan ? System.Drawing.Color.Red : System.Drawing.Color.Black);
-                    MySheet.Cells[excelRow, 1].Value = item.name;
-                    MySheet.Cells[excelRow, 2].Value = storeName;
-                    MySheet.Cells[excelRow, 3].Value = item.itemPriceVal;
-                    MySheet.Cells[excelRow, 4].Value = supplierPrice;
-                    //MySheet.Cells[excelRow, 5].Formula = $"+(C{excelRow}-(C{excelRow}*0.1)-(C{excelRow}*0.029+0.3))-D{excelRow}";   // "+(C2-(C2*0.1)-(C2*0.029+0.3))-D2";
-
-                    MySheet.Cells[excelRow, 5].Value = storeProfit;
-                    excelRow++;
-
-                    //string allItemStr = "added to excel: " + item.name + BR + item.secondaryInfo + BR + item.itemPrice + BR + storeName + BR + item.href + BR + BR;
-                    //myPrint(allItemStr);
-                }
-
-                if (isDentan && itemCount >= 3)
-                    break;
-
-                itemCount++;
-                if ((itemCount % 10) == 0)
-                {
-                    string str = "dentan not found in first " + itemCount.ToString() + " cheapest items" + BR;
-                    //myPrint(str);
-                }
-            }
-
-            // if no matches found - probably search of item was not good
-            if (sortedList.Count == 0)
-            {
-                MySheet.Cells[excelRow, 1].Value = $"NO ITEMS FOUND for: {search}";
-            }
-        }
-
-
-        private void AddItemRowsToExcelNew(List<itemData> sortedList, ExcelWorksheet MySheet, ref int excelRow,
-                double supplierPrice, SaleFreaksRow sfItem, string search, string DENTAN200)
-        {
-
-            itemData naItem = new itemData
-            {
-                name = "NA",
-                itemPrice = "0",
-                storeName = "NA",
-                itemPriceVal = 0
-            };
-
-            // new logic
-            // add green intial row
-            // add always exactlly 3 additional rows, if not enough rows just add NA:
-            // if less than 3 (1 or 2) - add all and pad with NA, else
-            // if 1,2 or 3 is dentan - add all three and finish, else
-            // search dentan first occurance to the end of list, if found ad 1,2 and the third iis Dentan, otherwise add 1,2,3
-
-            string ourStoreName = DENTAN200;
-
-            // add green line
-            MySheet.Cells[excelRow, 1, excelRow, 6].Style.Font.Color.SetColor(System.Drawing.Color.Green);
-            MySheet.Cells[excelRow, 1].Value = search;
-            excelRow++;
-
-
-            // find if detan in first 3 cheapest
-            bool dentanFound = false;
-            int maxScanForDentan = Math.Min(sortedList.Count, 3);
-            for (int i = 0; i < maxScanForDentan; i++)
-            {
-                itemData item = sortedList[i];
-                string storeName = item.storeName;
-                bool isDentan = storeName.ToLower().Contains(ourStoreName);
-                if (isDentan)
-                {
-                    dentanFound = true;
-                    break;
-                }
-            }
-
-            // if Dentan not in first 3 - try to move it to be third
-            if (!dentanFound)
-            {
-                // when can we try move dentan to be third?
-                //  if size of items is bigger than 3
-                if (sortedList.Count > 3)
-                {
-                    // try to move dentan to be third
-                    for (int i = 3; i < sortedList.Count; i++)
-                    {
-                        itemData item = sortedList[i];
-                        string storeName = item.storeName;
-                        bool isDentan = storeName.ToLower().Contains(ourStoreName);
-                        if (isDentan)
-                        {
-                            sortedList[2] = sortedList[i];
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // now add 3 rows to Excel, dentan is placed  third if found later,
-            // in case less than 3 rows - add empty rows
-            for (int i = 0; i < 3; i++)
-            {
-                itemData item = i < maxScanForDentan ? sortedList[i] : naItem;
-                addOneItemStoreToSheet(MySheet, item, excelRow, ourStoreName, supplierPrice);
-                excelRow++;
-            }
-        }
-       
-
-        private void addOneItemStoreToSheet(ExcelWorksheet MySheet, itemData item, int excelRow, string ourStoreName, double supplierPrice)
-        {
-            string storeName = item.storeName;
-            bool isDentan = storeName.ToLower().Contains(ourStoreName);
-            MySheet.Cells[excelRow, 1, excelRow, 3].Style.Font.Color.SetColor(
-                        isDentan ? System.Drawing.Color.Red : System.Drawing.Color.Black);
-                MySheet.Cells[excelRow, 1].Value = item.name;
-                MySheet.Cells[excelRow, 2].Value = storeName;
-                MySheet.Cells[excelRow, 3].Value = item.itemPriceVal;
-                MySheet.Cells[excelRow, 4].Value = supplierPrice;
 
         }
 
@@ -778,7 +660,7 @@ namespace ebayScrapper
 
         private double ParsePrice(string itemPrice)
         {
-            double itemPriceVal = 0;
+            double itemPriceVal = 10 ^ 12;
             Regex regex = new Regex(@"[0-9\.\,]+");
             Match match = regex.Match(itemPrice);
             if (match.Success)
@@ -813,15 +695,9 @@ namespace ebayScrapper
             return cookieCollection;
         }
 
-        private string geteithCookie()
+        private string getNirCookie()
         {
-            return @"__gads=ID=62ad543f7c2fedf5:T=1549893022:S=ALNI_MYFEhah3Q_mP701FcTTwHi_UH9BcA; AMCVS_A71B5B5B54F607AB0A4C98A2%40AdobeOrg=1; aam_uuid=79364735352223368744418895652241247728; cid=xxL8k42ZpyklFLRA%23116898012; cssg=dcd29e521680aa66b3d34cc3fff73048; ds1=ats/1551438010861; shs=BAQAAAWkXpsD9AAaAAVUAD15aRDoxNjM2NTEzNjM5MDA0LDK0ZzPfO+ICIGz7mcHS+V4rm0iYTw**; AMCV_A71B5B5B54F607AB0A4C98A2%40AdobeOrg=-1758798782%7CMCIDTS%7C17957%7CMCMID%7C79378343437816926314422478518540842061%7CMCAAMLH-1551883298%7C6%7CMCAAMB-1552042802%7C6G1ynYcLPuiQxYZrsz_pkqfLG9yMXBpb2zX5dvJdYQJzPXImdj0y%7CMCCIDH%7C-1360582403%7CMCOPTOUT-1551445202s%7CNONE%7CMCAID%7CNONE; JSESSIONID=570F04B15A86E473DBCEE8A773CEA47F; npii=btguid/dcd29e521680aa66b3d34cc3fff730485e5a45a5^cguid/dcd2a2f21680a16e95e7d5e1f03234ab5e5a45a5^; ds2=; ns1=btguid/dcd29e521680aa66b3d34cc3fff730485e5a45a5^cguid/dcd2a2f21680a16e95e7d5e1f03234ab5e5a45a5^; s=BAQAAAWkXpsD9AAWAAAwAClx6ZGoxNjI2MzEyNTExAPgAIFx6ZGpkY2QyOWU1MjE2ODBhYTY2YjNkMzRjYzNmZmY3MzA0OAFlAANcemRqIzAyAD0AElx6ZGpnb3NoZW5kZW50YWxzdXBwbHkBRQAIXlpGajU5MWRkYWU5ABEAF1x5FWowMDAwMGdvc2hlbmRlbnRhbHN1cHBseQCoAAFcemI6MQABABJcemI6Z29zaGVuZGVudGFsc3VwcGx5AAMAAVx6ZGowaEc1hQkSefxqyfSDvWjM+pZtclk*; nonsession=BAQAAAWkXpsD9AAaAAJ0ACF5aRqQwMDAwMDAwMQFkAAReWkakIzA4YQAIABxcoKAkMTU1MDU4MDQyNHgzMjM1NTIxMjk0NzV4MHgyTgAzAA5eWkakMDcwODctMjgyNixVU0EAywACXHkaLDQ1ABAAEl5aRqRnb3NoZW5kZW50YWxzdXBwbHkAygAgZd8UpGRjZDI5ZTUyMTY4MGFhNjZiM2QzNGNjM2ZmZjczMDQ4AJwAOF5aRqRuWStzSFoyUHJCbWRqNndWblkrc0VaMlByQTJkajZBQ2tvU2lDWktIb0EyZGo2eDluWStzZVE9PTepdbaY3OmnoW5KgxXnqAdg3gpc; dp1=bu1f/Keith5e5a46e2^tzo/-785c792172^exc/0%3A0%3A2%3A25ca0a062^u1p/Z29zaGVuZGVudGFsc3VwcGx55e5a46e2^bl/US603b7a62^expt/00015512973181755d6784e7^pbf/%2320040008000e000008080020000045e5a46e2^; ebay=%5EsfLMD%3D0%5Esin%3Din%5Esbf%3D%2310000000004%5Ecos%3D-a%5Ecv%3D15555%5Ejs%3D1%5E";
-
-        }
-        private string getDentan100Cookies()
-        {
-            return @"__gads=ID=b977e1c67c928371:T=1549381485:S=ALNI_MY-R6NxOkqsYnj-kLPljNhhEJ_KyQ; AMCVS_A71B5B5B54F607AB0A4C98A2%40AdobeOrg=1; aam_uuid=83238663137692414671863170432665548140; cid=xnO15sUAfab2PiI5%232109989202; cssg=be5501ae1680aa14441a56b6fff9bf59; ds1=ats/1549782971043; shs=BAQAAAWiwp5D/AAaAAVUAD15BAzsxNjI1NTk1MzIzMDA1LDKQP9GjL/d1QTvJ2J4EEPnq9IArfA**; AMCV_A71B5B5B54F607AB0A4C98A2%40AdobeOrg=-1758798782%7CMCIDTS%7C17769%7CMCMID%7C37008608051577466903841824514274180409%7CMCAAMLH-1535824101%7C6%7CMCAAMB-1535831084%7CRKhpRz8krg2tLO6pguXWp5olkAcUniQYPHaMWWgdJ3xzPWQmdj0y%7CMCCIDH%7C1029660565%7CMCOPTOUT-1535233484s%7CNONE%7CMCAID%7CNONE; JSESSIONID=29C4FB4E7448F0445DAF2C827F54197D; npii=btguid/be5501ae1680aa14441a56b6fff9bf595e4105f6^cguid/be550d981680ac1971c54779f8a105195e4105f6^; ds2=; ns1=BAQAAAWiwp5D/AAaAAKUAGV5BB0wxNzQ2NTY1NTY5LzA7NzIyMzQxNzgyLzA7D8Sgt36Eu30XiajueXX6t6hPm9w*; s=BAQAAAWiwp5D/AAWAAAwACVxhJWs3MjIzNDE3ODIA+AAgXGEla2JlNTUwMWFlMTY4MGFhMTQ0NDFhNTZiNmZmZjliZjU5AWUAA1xhJWsjMDIAPQAJXGEla2RlbnRhbjEwMAFFAAheQQdrNWFhNGM3OTQAEQAOXF/UazAwMDAwZGVudGFuMTAwAKgAAVxhITsxAAEACVxhITtkZW50YW4xMDAAAwAFXGElazE2Mzg4MteSXI4/BQv5d0PfW72AM8lKItE*; nonsession=BAQAAAWiwp5D/AAaAAJ0ACF5BCF4wMDAwMDAwMAFkAAReQQheIzAwYQAIABxch2HeMTU0OTYzNTM2N3gxMTM2MTM0NTk4Nzl4MHgyTgAzAAleQQheOTgxNjYsVVNBAMsAAlxf2+Y2NgCaAApcYnK7ZGVudGFuMTAwZwBAAAleQQheZGVudGFuMTAwABAACV5BCF5kZW50YW4xMDAAygAgZcXWXmJlNTUwMWFlMTY4MGFhMTQ0NDFhNTZiNmZmZjliZjU5AAQACV5BAztkZW50YW4xMDAAnAA4XkEIXm5ZK3NIWjJQckJtZGo2d1ZuWStzRVoyUHJBMmRqNndEa29DaURKR0ZxUTZkajZ4OW5ZK3NlUT09/Lf0txmouEM5pGajFcgtYTDx3Gc*; dp1=bkms/in60223ced^u1f/Orna5e41096d^tzo/-785c5fe3fd^exc/0%3A0%3A2%3A25c8762ed^u1p/ZGVudGFuMTAw5e41096d^bl/US60223ced^expt/00015493814820395d4a492a^pbf/%2320000008000e000008188020000045e41096d^; ebay=%5EsfLMD%3D1504680440%5Esin%3Din%5Esbf%3D%2310040000004%5Ecos%3D2%5Ecv%3D15555%5Ejs%3D1%5E";
-
+            return @"ak_bmsc=E4E8B61A2FB903AA1555183CD39784B2D419458AF2770000EF935C5CC960E208~plTfLLtJUDO46pPBcDwMsVJGI4XQHphZ5w9fS106/b1EIi5ZkBlCsmHfFxKiKGJPdycz/sp49iP+CNBUTl8oaWxH150FdkDuwik38MvqJ/Kh5ynmPxVnGQ5bA7LZjn5IZ/hgv0xs2CtCYLyVGpJpFUoriscJppH3yG3SwWdDO9qzJusDA8kmuxAXjk9AfTVrO8H0nnZUc3nEKXktW0QUfipxVBQUZZYeSFhoHr38RbKtE=; AMCVS_A71B5B5B54F607AB0A4C98A2%40AdobeOrg=1; AMCV_A71B5B5B54F607AB0A4C98A2%40AdobeOrg=-1758798782%7CMCIDTS%7C17935%7CMCMID%7C89573892650283794342962628702795429665%7CMCAAMLH-1550175887%7C6%7CMCAAMB-1550175887%7CRKhpRz8krg2tLO6pguXWp5olkAcUniQYPHaMWWgdJ3xzPWQmdj0y%7CMCCIDH%7C-725061326%7CMCOPTOUT-1549578287s%7CNONE%7CMCAID%7CNONE; aam_uuid=89542346242826103272959289354595913372; __gads=ID=db5c1504e9d30691:T=1549571084:S=ALNI_MYZKX-EGCD0p9tVIy_f7lJIlgOwtw; cid=q8aqM8nancmUw4T2%23198663149; npii=btguid/c9a1e0b91680ab4c92215d7bfff87f885e3dce0f^cguid/c9a1ea641680aa14c2050337f4cbd3d25e3dce0f^; bm_sv=7BCE25893C47DB6ABF0C2F745F495F3C~e9zH8sUYxS7ppvgAqnCBHldA2LnKDi19lq6b3lf2FJKwFdNkHR0GuCg6P0Zc3d1ImdQACX31nrk2+P+3Jej6+GfAXCkOFWkwrurfThdQ41eydm4G8NSlvJyV++Coz898Cmkm5iVc1qKkUzr4mTXi0Q==; ebay=%5Ejs%3D1%5EsfLMD%3D0%5Esin%3Din%5Esbf%3D%2300000004%5E; ns1=BAQAAAWgWKMkCAAaAAKUADV49zigxNzQ2NTY1NTY5LzA7ANgASl49zhhjNjl8NjAxXjE1NDk1NzEwODA1NTReXjFeM3wyfDV8NHw3fDExXl5eNF4zXjEyXjEyXjJeMV4xXjBeMV4wXjFeNjQ0MjQ1OTA3NS3lSkvHrEcgKb0pzB6zb/TGsO1s; dp1=bu1p/ZGVudGFuMjAw5e3dce28^kms/in601f01a8^pbf/%23200000000000000000080000000045e3dce28^u1f/Orna+5e3dce28^tzo/1a45c5ca8a8^bl/US601f01a8^; s=BAQAAAWgWKMkCAAWAAAEACVxd7ChkZW50YW4yMDAAAwABXF3sKDAADAAKXF3sKDE3NDY1NjU1NjkAEQAOXFyfWDAwMDAwZGVudGFuMjAwAD0ACVxd7ChkZW50YW4yMDAAqAABXF3sKDEA+AAgXF3sGGM5YTFlMGI5MTY4MGFiNGM5MjIxNWQ3YmZmZjg3Zjg4AWUAA1xd7CgjMDLPcLbrva4RubDCFEbt5ntguCdTcw**; nonsession=BAQAAAWgWKMkCAAaAAAQACV49zihkZW50YW4yMDAAEAAJXj3OKGRlbnRhbjIwMAAzAAlePc4oOTgxNDgsVVNBAEAACV49zihkZW50YW4yMDAAmgAKXF89qGRlbnRhbjIwMGcAnAA4Xj3OKG5ZK3NIWjJQckJtZGo2d1ZuWStzRVoyUHJBMmRqNkFEbElTa0RwV0hwd1dkajZ4OW5ZK3NlUT09AJ0ACF49zigwMDAwMDAwMADKACBlwpwYYzlhMWUwYjkxNjgwYWI0YzkyMjE1ZDdiZmZmODdmODgAywACXFyhrzI4AWQABF49zigjMDBhrKESUXfCojfvVnFH4cDvcp1BIRA*; ds1=ats/1549572776808; shs=BAQAAAWgWKMkCAAaAAVUAD149zigxNjMwMzY1NDYyMDA5LDISyGy3OkD5q+k3BlqLYpAI98WOKA**";
         }
 
         private string getYakovEbayCookies()
@@ -960,128 +836,6 @@ namespace ebayScrapper
             }
             return cc;
         }
-
-
-
-
-
-
-        public class ExcelReadDental
-        {
-
-            private static string reduceString(string s,int howmany) {
-                string str = " ";
-                string[] words = s.Split(' ');
-                for(int i = 0; i < howmany; i++)
-                {
-                    str = str + words[i] + " ";
-                }
-                return str;
-            }
-
-            public static string CodeOnly(string s)
-            {
-                string str = " ";
-                string[] words = s.Split(' ');
-                return words[1];
-            }
-            public static List<SaleFreaksRow> ReduceTextOnList(List<SaleFreaksRow> mylistofitems)
-            {
-                List<SaleFreaksRow> newlistofitems = new List<SaleFreaksRow>();
-                foreach(SaleFreaksRow item in mylistofitems)
-                {
-                    
-                    string title = item.title;
-              
-                    string price = item.price;
-                    string profit = item.profit;
-                    if (title != null)
-                    {
-                        title = reduceString(title, 3);
-                        Console.WriteLine("THE TITLE IS: "+title);
-                        newlistofitems.Add(new SaleFreaksRow { price = price, profit = "0", title = title });
-                    }
-
-                    
-                }
-
-                return newlistofitems;
-            }
-            public static List<SaleFreaksRow> ReduceTextToCodeOnly(List<SaleFreaksRow> mylistofitems)
-            {
-                List<SaleFreaksRow> newlistofitems = new List<SaleFreaksRow>();
-                foreach (SaleFreaksRow item in mylistofitems)
-                {
-
-                    string title = item.title;
-
-                    string price = item.price;
-                    string profit = item.profit;
-                    if (title != null)
-                    {
-                        title = CodeOnly(title);
-                        Console.WriteLine("title is: "+title);
-                        newlistofitems.Add(new SaleFreaksRow { price = price, profit = "0", title = title });
-                    }
-
-
-                }
-
-                return newlistofitems;
-            }
-
-
-            public static List<SaleFreaksRow> readXLS()
-            {
-                List<SaleFreaksRow> mylistofItems=new List<SaleFreaksRow>();
-                //FileInfo existingFile = new FileInfo(@"C:\Cash\Dental\DenTan\eBay\N\Scrap SW\\ebayScrapper");
-
-                string inputFileNameOnNirPC = @"C:\Users\Owner\Desktop\ebayScrapper\ebayScrapper\Dental4.xlsx";
-                string inputFileNameOnAmirPC = @"Dental4.xlsx";
-                bool onNirPC = false; // NIR - change this to true 
-
-                FileInfo existingFile = new FileInfo(onNirPC ? inputFileNameOnNirPC : inputFileNameOnAmirPC);
-                using (ExcelPackage package = new ExcelPackage(existingFile))
-                {
-                    //get the first worksheet in the workbook
-                    ExcelWorksheet worksheet = package.Workbook.Worksheets[1];
-                    int colCount = worksheet.Dimension.End.Column;  //get Column Count
-                    int rowCount = worksheet.Dimension.End.Row;     //get row count
-                    for (int i = 2; i < rowCount; i++)
-                    {
-                        string title = (string)worksheet.Cells[i, 1].Value;
-                        string price = (string)worksheet.Cells[i, 3].Value;
-                        //   FOR NOW PROFIT IS IRRLEVNAT
-                        mylistofItems.Add(new SaleFreaksRow { price =price, profit = "0", title =title });
-                        if (title != null)
-                        {
-                            if (title[0] != '3')
-                            {   
-
-
-                               
-
-;                            }
-                        }
-
-
-
-                        
-                    }
-                }
-                //List<SaleFreaksRow> newlist = ExcelReadDental.ReduceTextOnList(mylistofItems);
-                List<SaleFreaksRow> newlist = ExcelReadDental.ReduceTextOnList(mylistofItems);
-              //  Console.WriteLine(newlist[1].title);
-                return mylistofItems;
-            }
-
-
-
-
-        }
-
-
-
 
 
 
